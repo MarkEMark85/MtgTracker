@@ -1,0 +1,2 @@
+win_cons = ['COMBAT', 'BURN', 'MILL', 'CONCEDE', 'ALT']
+win_details = ['GREG', 'COMBO', 'OVERRUN', 'COMMANDER', 'DRAIN', 'ARISTOCRATS', 'FIREBALL', 'PAPER_CUTS']
