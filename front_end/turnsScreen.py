@@ -5,12 +5,15 @@ from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.checkbox import CheckBox
 from endGameScreen import EndGameScreen
+from sql.sql import insert_into_turns
 
 
 class TurnsScreen(Screen):
 
-    def __init__(self, players, **kwargs):
+    def __init__(self, players, is_test, game_id, **kwargs):
         super(TurnsScreen, self).__init__(**kwargs)
+        self.is_test = is_test
+        self.game_id = game_id
         self.players = players
         self.main_grid = GridLayout(cols=1)
         self.turn_grid = GridLayout(cols=len(players)*2)
@@ -40,7 +43,6 @@ class TurnsScreen(Screen):
         self.main_grid.add_widget(self.end_button)
         self.add_widget(self.main_grid)
 
-
     def sub_one(self, instance):
         self.counter_grid.counter -= 1
         self.counter_grid.count_label.text = str(self.counter_grid.counter)
@@ -50,9 +52,14 @@ class TurnsScreen(Screen):
         self.counter_grid.count_label.text = str(self.counter_grid.counter)
 
     def create_turn_checks(self):
+        counter = 0
         for player in self.players:
             self.turn_grid.add_widget(Label(text=player, text_size=(80, 0), halign='right'))
-            self.turn_grid.add_widget(CheckBox(group='players'))
+            if counter == 0:
+                self.turn_grid.add_widget(CheckBox(group='players', active=True))
+                counter += 1
+            else:
+                self.turn_grid.add_widget(CheckBox(group='players'))
 
     def create_damage_grid(self):
         count = 0
@@ -87,25 +94,43 @@ class TurnsScreen(Screen):
                     this_row = []
                     count = 0
         self.do_the_math(rows)
+        insert_into_turns(self.is_test, self.game_id, self.counter_grid.children[1],
+                          self.get_active_player(), self.rows_to_text(rows))
         self.update_children(self.damage_grid.children, rows)
 
     def go_to_end_screen(self, instance):
-        self.parent.add_widget(EndGameScreen(name='End', players=self.players, turns=self.counter_grid.counter))
+        self.parent.switch_to(EndGameScreen(name='End', players=self.players, turns=self.counter_grid.counter,
+                                            is_test=self.is_test, game_id=self.game_id))
 
-        self.parent.current = 'End'
+    def get_active_player(self):
+        children = self.turn_grid.children
+        counter = 0
+        for child in children:
+            if type(child) == CheckBox:
+                if child.active:
+                    return children[counter+1]
+            counter += 1
+
+    def rows_to_text(self, rows):
+        temp_rows = []
+        temp_rows.extend(rows)
+        temp_rows.pop(0)
+        ret_val = ''
+        for row in temp_rows:
+            ret_val += row[0] + ' ' + row[len(self.players)+1]
 
     @staticmethod
-    def do_the_math(tealth):
-        for i in range(1, len(tealth)):
+    def do_the_math(temporary_health):
+        for i in range(1, len(temporary_health)):
             sumt = 0
-            life = int(tealth[i][len(tealth)])
-            for j in range(1, len(tealth)):
-                added_life = tealth[j][i]
+            life = int(temporary_health[i][len(temporary_health)])
+            for j in range(1, len(temporary_health)):
+                added_life = temporary_health[j][i]
                 if added_life == '':
                     added_life = '0'
                 sumt += int(added_life)
-                tealth[j][i] = ''
-            tealth[i][len(tealth)] = str(life - sumt)
+                temporary_health[j][i] = ''
+            temporary_health[i][len(temporary_health)] = str(life - sumt)
 
     @staticmethod
     def collect_children_text(children):

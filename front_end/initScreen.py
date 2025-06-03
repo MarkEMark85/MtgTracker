@@ -8,26 +8,27 @@ from gameScreen import GameScreen
 
 class InitScreen(Screen):
 
-    def __init__(self, **kwargs):
+    def __init__(self, is_test, **kwargs):
         super(InitScreen, self).__init__(**kwargs)
         self.grid = GridLayout(cols=1)
         self.inside_grid = GridLayout(cols=2)
+        self.is_test = is_test
 
         self.inside_grid.add_widget(Label(text='Number Of Players'))
         self.inside_grid.players = TextInput(text='4', multiline=False, halign='center')
         self.inside_grid.players.font_size = str(self.inside_grid.players.height+50)
         self.inside_grid.add_widget(self.inside_grid.players)
 
-        self.grid.next_button = Button(text='Next', background_color='blue', on_press=self.go_to_game)
+        self.grid.next_button = Button(text='Next', background_color='blue', on_release=self.go_to_game)
         self.grid.add_widget(self.inside_grid)
         self.grid.add_widget(self.grid.next_button)
 
-        self.grid.menu_button = Button(text='Menu', on_press=self.go_to_menu)
+        self.grid.menu_button = Button(text='Menu', on_release=self.go_to_menu)
         self.grid.add_widget(self.grid.menu_button)
         self.add_widget(self.grid)
 
     def go_to_game(self, instance):
-        self.parent.add_widget(GameScreen(name='Game', players=int(self.inside_grid.players.text)))
+        self.parent.add_widget(GameScreen(name='Game', players=int(self.inside_grid.players.text), is_test=self.is_test))
         self.parent.current = 'Game'
 
     def go_to_menu(self, instance):

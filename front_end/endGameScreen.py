@@ -3,15 +3,18 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.checkbox import CheckBox
+from datetime import date
+from sql.sql import insert_into_winner_table
 
 
 class EndGameScreen(Screen):
 
-    def __init__(self, players, turns, **kwargs):
+    def __init__(self, players, turns, is_test, game_id, **kwargs):
         super(EndGameScreen, self).__init__(**kwargs)
+        self.game_id = game_id
         self.players = players
         self.turns = turns
+        self.is_test = is_test
         self.main_grid = GridLayout(cols=1)
         self.name_info = GridLayout(cols=len(players)+1)
         self.name_info.add_widget(Label(text='Name:', halign='left', text_size=(200, 0), font_size='30'))
@@ -29,7 +32,7 @@ class EndGameScreen(Screen):
         
         self.get_game_info()
         self.insert_win_tabs()
-        self.main_grid.add_widget(Button(text='Save', font_size='40', background_color='blue'))
+        self.main_grid.add_widget(Button(text='Save', font_size='40', background_color='blue', on_release=self.save_game))
         self.main_grid.add_widget(self.name_info)
         self.main_grid.add_widget(self.deck_info)
         self.main_grid.add_widget(self.pos_info)
@@ -57,3 +60,21 @@ class EndGameScreen(Screen):
     def insert_win_tabs(self):
         for _ in range(len(self.players)):
             self.win_info.add_widget(TextInput(halign='center', font_size=str(self.win_info.height-20)))
+
+    def save_game(self, instance):
+        winner_info = self.get_winner_info()
+        insert_into_winner_table(self.is_test, self.name_info.children[winner_info].text.strip(),
+                                 self.deck_info.children[winner_info].text.strip(),
+                                 self.pos_info.children[winner_info].text.strip(),
+                                 'Commander', self.other_info.children[2].text.strip(), date.today(),
+                                 self.other_info.children[1].text.strip(), self.other_info.children[0].text.strip(),
+                                 self.game_id)
+        self.parent.current = 'Menu'
+
+    def get_winner_info(self):
+        children = self.win_info.children
+        counter = 0
+        for child in children:
+            if child.text == '1':
+                return counter
+            counter += 1
