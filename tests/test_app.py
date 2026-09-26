@@ -101,9 +101,10 @@ def test_summary_and_history_and_delete(client):
     first = by(history, "id", gid)
     assert first["notes"] == "close one"
     assert first["participants"][0] == {
-        "player": "Mark", "deck": "Atraxa, Praetors' Voice", "commander": None,
-        "seat": 1, "finish_place": 1, "eliminated_turn": None,
+        "player": "Mark", "deck": "Atraxa, Praetors' Voice", "commander": None, "archetype": None,
+        "seat": 1, "finish_place": 1, "eliminated_turn": None, "eliminated_by": None,
     }
+    assert first["is_draw"] is False
 
     assert client.delete(f"/api/games/{gid}").status_code == 204
     assert client.delete(f"/api/games/{gid}").status_code == 404
@@ -161,3 +162,186 @@ def test_deck_matchup_stats(client):
 
     krenko = next(p for p in pairs if "Krenko" in (p["deck_a"], p["deck_b"]))
     assert krenko["games"] == 1
+
+
+def deck_id(client, owner, name):
+    return next(d["id"] for d in client.get("/api/decks", params={"owner": owner}).json() if d["name"] == name)
+
+
+def test_deck_matchup_filter_lists_every_opponent_of_chosen_deck(client):
+    client.post("/api/games", json=game(TABLE, "Brett"))
+    client.post("/api/games", json=game([("Chris", "Krenko"), ("Brett", "Omnath")], "Chris"))
+
+    omnath = deck_id(client, "Brett", "Omnath")
+    rows = client.get("/api/stats/deck-matchups", params={"deck": omnath}).json()
+    assert {r["deck_a"] for r in rows} == {"Omnath"}                       # chosen deck always on the a side
+    assert {r["deck_b"] for r in rows} == {"Atraxa, Praetors' Voice", "Krenko"}
+    krenko = by(rows, "deck_b", "Krenko")
+    assert (krenko["games"], krenko["a_wins"], krenko["b_wins"]) == (2, 1, 1)
+
+    atraxa = deck_id(client, "Mark", "Atraxa, Praetors' Voice")
+    both = client.get("/api/stats/deck-matchups", params={"deck": [omnath, atraxa]}).json()
+    assert {r["deck_a_id"] for r in both} == {omnath, atraxa}
+    assert all(r["deck_a_id"] != r["deck_b_id"] for r in both)
+
+    too_many = client.get("/api/stats/deck-matchups", params={"deck": [1, 2, 3, 4]})
+    assert too_many.status_code == 422
+
+
+def test_win_con_labels_and_archetypes_in_meta(client):
+    meta = client.get("/api/meta").json()
+    assert {"code": "POISON", "label": "Poison / infect"} in meta["win_cons"]
+    assert "VOLTRON" in {a["code"] for a in meta["archetypes"]}
+
+    payload = game(TABLE, "Mark", win_con="COMBO", winning_play="Thassa's Oracle")
+    payload["participants"][0]["archetype"] = "COMBO"
+    client.post("/api/games", json=payload)
+    g = client.get("/api/games").json()[0]
+    assert (g["win_con"], g["winning_play"]) == ("COMBO", "Thassa's Oracle")
+    assert by(client.get("/api/decks").json(), "owner", "Mark")["archetype"] == "COMBO"
+
+    bad = game(TABLE, "Mark", win_con="MAGIC")
+    assert client.post("/api/games", json=bad).status_code == 422
+    bad = game(TABLE, "Mark")
+    bad["participants"][0]["archetype"] = "TRIBAL-ISH"
+    assert client.post("/api/games", json=bad).status_code == 422
+
+
+def test_draw_counts_for_no_one(client):
+    draw = game(TABLE, "Mark", is_draw=True)
+    draw["participants"][1]["finish_place"] = 1  # Mark and Chris tied, Brett out first
+    draw["participants"][2]["finish_place"] = 3
+    assert client.post("/api/games", json=draw).status_code == 201
+    client.post("/api/games", json=game(TABLE, "Brett"))
+
+    players = client.get("/api/stats/players").json()
+    assert by(players, "player", "Mark")["wins"] == 0
+    assert by(players, "player", "Brett")["wins"] == 1
+    assert client.get("/api/stats/summary").json()["draws"] == 1
+    pair = next(p for p in client.get("/api/stats/matchups").json() if {p["player_a"], p["player_b"]} == {"Mark", "Chris"})
+    assert (pair["a_wins"], pair["b_wins"]) == (0, 0)
+    assert client.get("/api/games").json()[1]["is_draw"] is True
+
+
+@pytest.mark.parametrize("is_draw, firsts, message", [
+    (True, 1, "a draw needs at least two"),
+    (False, 2, "exactly one player"),
+])
+def test_draw_validation(client, is_draw, firsts, message):
+    payload = game(TABLE, "Mark", is_draw=is_draw)
+    for p in payload["participants"][:firsts]:
+        p["finish_place"] = 1
+    r = client.post("/api/games", json=payload)
+    assert r.status_code == 422 and message in r.text
+
+
+def test_win_rate_vs_par_uses_table_size(client):
+    client.post("/api/games", json=game(TABLE + [("Dana", "Sliver")], "Mark"))  # 4 players: par 25
+    client.post("/api/games", json=game(TABLE, "Chris"))                        # 3 players: par 33.3
+    mark = by(client.get("/api/stats/players").json(), "player", "Mark")
+    assert (mark["win_rate"], mark["par"], mark["vs_par"]) == (50.0, 29.2, 20.8)
+    assert mark["last10"] == {"wins": 1, "games": 2}
+    dana = by(client.get("/api/stats/players").json(), "player", "Dana")
+    assert (dana["par"], dana["vs_par"]) == (25.0, -25.0)
+    seat1 = by(client.get("/api/stats/seats").json(), "seat", 1)
+    assert seat1["par"] == 29.2
+
+
+def test_knocked_out_by_and_nemesis(client):
+    first = game(TABLE, "Mark")
+    first["participants"][1]["eliminated_by"] = "mark"   # case-insensitive
+    first["participants"][2]["eliminated_by"] = "Mark"
+    client.post("/api/games", json=first)
+    second = game(TABLE, "Chris")
+    second["participants"][0]["eliminated_by"] = "Chris"
+    client.post("/api/games", json=second)
+
+    ko = {r["player"]: r for r in client.get("/api/stats/knockouts").json()}
+    assert ko["Mark"]["kos"] == 2 and ko["Chris"]["kos"] == 1
+    assert ko["Brett"]["nemesis"] == {"name": "Mark", "count": 1}
+    assert ko["Mark"]["nemesis"] == {"name": "Chris", "count": 1}
+    assert ko["Brett"]["first_out"] == 2 and ko["Brett"]["first_out_rate"] == 100.0
+    history = client.get("/api/games").json()
+    assert by(history[1]["participants"], "player", "Brett")["eliminated_by"] == "Mark"
+
+    for name, message in (("Brett", "knock themselves out"), ("Zed", "not at the table")):
+        bad = game(TABLE, "Mark")
+        bad["participants"][2]["eliminated_by"] = name
+        r = client.post("/api/games", json=bad)
+        assert r.status_code == 422 and message in r.text
+
+
+def test_damage_dealt(client):
+    first = game(TABLE, "Mark", damage=[
+        {"source": "Mark", "target": "Chris", "amount": 30},
+        {"source": "Mark", "target": "Chris", "amount": 10},          # merged with the row above
+        {"source": "Mark", "target": "Brett", "amount": 21, "commander": True},
+        {"source": "Chris", "target": "Mark", "amount": 12},
+    ])
+    gid = client.post("/api/games", json=first).json()["id"]
+    client.post("/api/games", json=game(TABLE, "Chris"))  # untracked game: ignored in damage averages
+
+    players = client.get("/api/stats/players").json()
+    assert by(players, "player", "Mark")["avg_dmg"] == 61.0
+    assert by(players, "player", "Brett")["avg_dmg"] == 0.0
+    assert by(client.get("/api/stats/decks").json(), "owner", "Chris")["avg_dmg"] == 12.0
+
+    ko = {r["player"]: r for r in client.get("/api/stats/knockouts").json()}
+    assert ko["Mark"]["most_targeted"] == {"name": "Chris", "count": 40}
+    assert (ko["Chris"]["avg_taken"], ko["Brett"]["avg_taken"]) == (40.0, 21.0)
+    assert ko["Brett"]["most_targeted"] is None
+
+    for bad_row in ({"source": "Mark", "target": "Mark", "amount": 3},
+                    {"source": "Mark", "target": "Zed", "amount": 3},
+                    {"source": "Mark", "target": "Chris", "amount": 0}):
+        assert client.post("/api/games", json=game(TABLE, "Mark", damage=[bad_row])).status_code == 422
+
+    client.delete(f"/api/games/{gid}")
+    assert by(client.get("/api/stats/players").json(), "player", "Mark")["avg_dmg"] is None
+
+
+def test_deck_detail(client):
+    client.post("/api/games", json=game(TABLE, "Mark", win_con="POISON"))
+    client.post("/api/games", json=game([("Chris", "Krenko"), ("Mark", "Atraxa, Praetors' Voice")], "Mark", win_con="COMBAT"))
+    client.post("/api/games", json=game(TABLE, "Chris"))
+
+    atraxa = deck_id(client, "Mark", "Atraxa, Praetors' Voice")
+    detail = client.get(f"/api/stats/decks/{atraxa}").json()
+    assert detail["owner"] == "Mark"
+    assert {w["win_con"]: w["games"] for w in detail["win_cons"]} == {"POISON": 1, "COMBAT": 1}
+    assert {s["seat"]: (s["games"], s["wins"]) for s in detail["seats"]} == {1: (2, 1), 2: (1, 1)}
+    assert [r["result"] for r in detail["recent"]] == ["L", "W", "W"]
+    assert client.get("/api/stats/decks/999").status_code == 404
+    assert "id" in client.get("/api/stats/decks").json()[0]
+
+
+OLD_SCHEMA = """
+CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE);
+CREATE TABLE decks (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE, owner_id INTEGER NOT NULL,
+                    commander TEXT, colors TEXT, UNIQUE (name, owner_id));
+CREATE TABLE games (id INTEGER PRIMARY KEY, played_at TEXT NOT NULL, turns INTEGER, win_con TEXT,
+                    win_details TEXT, notes TEXT);
+CREATE TABLE game_players (game_id INTEGER NOT NULL, player_id INTEGER NOT NULL, deck_id INTEGER NOT NULL,
+                           seat INTEGER NOT NULL, finish_place INTEGER NOT NULL, eliminated_turn INTEGER,
+                           PRIMARY KEY (game_id, player_id), UNIQUE (game_id, seat));
+CREATE TABLE turn_events (id INTEGER PRIMARY KEY, game_id INTEGER NOT NULL, round INTEGER NOT NULL,
+                          player_id INTEGER, event TEXT NOT NULL);
+INSERT INTO players VALUES (1, 'Mark'), (2, 'Chris');
+INSERT INTO decks VALUES (1, 'Sigarda', 1, NULL, NULL), (2, 'Krenko', 2, NULL, NULL);
+INSERT INTO games VALUES (1, '2026-09-01T20:00:00', 7, 'COMMANDER', 'VOLTRON', NULL);
+INSERT INTO game_players VALUES (1, 1, 1, 1, 1, NULL), (1, 2, 2, 2, 2, 6);
+"""
+
+
+def test_old_database_is_migrated(tmp_path, monkeypatch):
+    path = tmp_path / "old.db"
+    with db.connect(path) as conn:
+        conn.executescript(OLD_SCHEMA)
+    monkeypatch.setenv("MTG_DB", str(path))
+    with TestClient(app) as c:
+        decks = {d["name"]: d["archetype"] for d in c.get("/api/decks").json()}
+        assert decks == {"Sigarda": "VOLTRON", "Krenko": None}
+        assert c.get("/api/games").json()[0]["is_draw"] is False
+        assert by(c.get("/api/stats/players").json(), "player", "Mark")["wins"] == 1
+        assert c.post("/api/games", json=game([("Mark", "Sigarda"), ("Chris", "Krenko")], "Chris")).status_code == 201
+    db.init_db(path)  # running again is a no-op

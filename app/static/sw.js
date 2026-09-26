@@ -1,6 +1,6 @@
 // Caches the app shell so it opens quickly and survives a flaky connection.
 // API calls always go to the network; an in-progress game lives in localStorage.
-const CACHE = "mtg-tracker-v1";
+const CACHE = "mtg-tracker-v2";
 const SHELL = ["/", "/static/style.css", "/static/app.js", "/static/manifest.json", "/static/icon.svg", "/static/icon-192.png"];
 
 self.addEventListener("install", (e) => {

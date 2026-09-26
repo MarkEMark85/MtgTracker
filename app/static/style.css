@@ -151,7 +151,7 @@ label { display: block; font-weight: 600; margin: 10px 0 6px; }
 }
 .pcard.active { border-color: var(--seat); box-shadow: 0 0 0 3px color-mix(in srgb, var(--seat) 30%, transparent); }
 .pcard.lethal .life { color: var(--danger); }
-.pcard.out { opacity: 0.45; }
+.pcard.out > :not(.outby):not(.chip.wide) { opacity: 0.45; }
 .pcard.wide { grid-column: 1 / -1; }
 .pcard-head { cursor: pointer; border-top: 4px solid var(--seat); margin: -10px -10px 6px; padding: 8px 10px 0; border-radius: 12px 12px 0 0; }
 .pname { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -182,6 +182,10 @@ label { display: block; font-weight: 600; margin: 10px 0 6px; }
 /* ---------- end game ---------- */
 .place-row { border-left: 4px solid var(--seat); padding-left: 10px; margin-top: 10px; }
 .place-row select { width: 100px; }
+.place-row .outby-row { margin-top: 6px; }
+.place-row .outby-row select { width: 150px; min-height: 40px; padding: 6px 10px; }
+.dmg-row { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.dmg-row:last-child { border-bottom: 0; }
 
 /* ---------- stats ---------- */
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
@@ -228,3 +232,24 @@ tr:last-child td { border-bottom: 0; }
 .h2h-switch { display: inline-flex; margin-bottom: 8px; }
 .h2h-pair { display: flex; flex-direction: column; gap: 2px; }
 .h2h-pair > .muted { font-size: 0.8rem; }
+.h2h-heading { font-size: 1rem; margin: 16px 0 4px; }
+[data-h2h-add] { margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+
+/* ---------- shared bits ---------- */
+.chip.sm { min-height: 34px; padding: 5px 10px; font-size: 0.82rem; }
+.pos { color: #7ed957; font-weight: 600; }
+.neg { color: var(--danger); font-weight: 600; }
+.tag { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; margin: 3px 4px 0 0; font-size: 0.8rem; font-weight: 500; }
+
+/* ---------- knocked out by (live card) ---------- */
+.outby { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* ---------- deck detail (Decks tab) ---------- */
+tr.clickable { cursor: pointer; }
+tr.clickable.open td { border-bottom: 0; background: var(--surface-2); }
+tr.detail td { background: var(--surface-2); padding: 4px 10px 12px; }
+.detail-block { margin-top: 8px; }
+.result { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: 3px 3px 0 0; border-radius: 6px; font-size: 0.78rem; font-weight: 700; background: var(--border); }
+.result.W { background: var(--accent); color: var(--accent-text); }
+.result.D { background: #4a90e2; color: #fff; }
