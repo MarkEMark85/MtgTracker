@@ -279,10 +279,10 @@ def stats_deck_matchups(deck: Optional[List[int]] = Query(None)):
         return db.deck_matchup_stats(conn, deck)
 
 
-@app.get("/api/stats/knockouts")
-def stats_knockouts():
+@app.get("/api/stats/nemesis")
+def stats_nemesis():
     with db.connect() as conn:
-        return db.knockout_stats(conn)
+        return db.nemesis_stats(conn)
 
 
 # ---------- front end ----------

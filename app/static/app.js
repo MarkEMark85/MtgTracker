@@ -73,6 +73,7 @@ const state = {
   players: [],
   decks: [],
   statsTab: "players",
+  statsView: "results",  // Players/Decks tabs: "results" or "combat" columns
   h2hMode: "players",
   h2hDecks: load(H2H_KEY) || [],
   deckOpen: null,  // deck id expanded in the Decks stats tab
@@ -503,7 +504,7 @@ async function submitGame(btn) {
 
 function viewStats() {
   const tabs = [["players", "Players"], ["decks", "Decks"], ["seats", "Seats"], ["matchups", "Head-to-head"],
-    ["knockouts", "Knockouts"], ["wincons", "Win cons"]];
+    ["nemesis", "Nemesis"], ["wincons", "Win cons"]];
   return `
     ${topbar("Stats", "home")}
     <div id="summary" class="tiles"></div>
@@ -534,8 +535,25 @@ function bar(v) {
 const vsPar = { label: "&plusmn;Par", num: true, raw: true, fmt: (r) =>
   `<span class="${r.vs_par > 0 ? "pos" : r.vs_par < 0 ? "neg" : "muted"}">${r.vs_par > 0 ? "+" : ""}${r.vs_par.toFixed(1)}</span>` };
 const last10 = { label: "Last 10", num: true, fmt: (r) => `${r.last10.wins}/${r.last10.games}` };
-const avgDmg = { label: "Dmg/g", key: "avg_dmg", num: true };
 const nameCount = (x) => x ? `${esc(x.name)} <span class="muted">&times;${x.count}</span>` : "–";
+// Knockout and damage columns, shared by the Players and Decks tabs' Combat view.
+const combatCols = [
+  { label: "KOs", key: "kos", num: true },
+  { label: "Out 1st", num: true, fmt: (r) => `${r.first_out} (${r.first_out_rate.toFixed(0)}%)` },
+  { label: "Dealt", key: "avg_dmg", num: true },
+  { label: "Taken", key: "avg_taken", num: true },
+  { label: "Hits most", raw: true, fmt: (r) => nameCount(r.most_targeted) },
+];
+
+function viewSwitch() {
+  return `<div class="seg h2h-switch">
+    ${[["results", "Results"], ["combat", "Combat"]].map(([k, label]) =>
+      `<button class="${state.statsView === k ? "on" : ""}" data-action="stats-view" data-mode="${k}">${label}</button>`).join("")}
+  </div>
+  ${state.statsView === "combat"
+    ? `<p class="muted small">Dealt and Taken are per game, only count games where damage was tracked, and credit damage to whoever's turn it was.</p>`
+    : parNote()}`;
+}
 
 async function loadStats() {
   const body = document.getElementById("stats-body");
@@ -548,10 +566,12 @@ async function loadStats() {
     let html;
     switch (state.statsTab) {
       case "players":
-        html = parNote() + table([
+        html = viewSwitch() + table([
           { label: "Player", key: "player" }, { label: "G", key: "games", num: true },
-          { label: "W", key: "wins", num: true }, pct("win_rate"), vsPar, last10,
-          { label: "Avg place", key: "avg_finish", num: true }, { label: "Win turn", key: "avg_win_turn", num: true }, avgDmg,
+          ...(state.statsView === "combat" ? combatCols : [
+            { label: "W", key: "wins", num: true }, pct("win_rate"), vsPar, last10,
+            { label: "Avg place", key: "avg_finish", num: true }, { label: "Win turn", key: "avg_win_turn", num: true },
+          ]),
         ], await api("/stats/players"));
         break;
       case "decks":
@@ -566,15 +586,11 @@ async function loadStats() {
       case "matchups":
         html = await matchupsTab();
         break;
-      case "knockouts":
-        html = `<p class="muted small">Nemesis = who knocks this player out most. Damage is per game, and only counts games where it was tracked.</p>` + table([
+      case "nemesis":
+        html = `<p class="muted small">Who knocks each player out most often.</p>` + table([
           { label: "Player", key: "player" }, { label: "G", key: "games", num: true },
-          { label: "KOs", key: "kos", num: true },
-          { label: "Out 1st", num: true, fmt: (r) => `${r.first_out} (${r.first_out_rate.toFixed(0)}%)` },
           { label: "Nemesis", raw: true, fmt: (r) => nameCount(r.nemesis) },
-          { label: "Dealt", key: "avg_dealt", num: true }, { label: "Taken", key: "avg_taken", num: true },
-          { label: "Hits most", raw: true, fmt: (r) => nameCount(r.most_targeted) },
-        ], await api("/stats/knockouts"));
+        ], await api("/stats/nemesis"));
         break;
       case "wincons":
         html = table([
@@ -601,10 +617,13 @@ async function decksTab() {
   const cols = [
     { label: "Deck", raw: true, fmt: (r) => `${esc(r.deck)}<div class="muted small">${esc(r.owner)}${
       r.archetype ? " &middot; " + esc(labelOf("archetypes", r.archetype)) : ""}</div>` },
-    { label: "G", key: "games", num: true }, { label: "W", key: "wins", num: true }, pct("win_rate"), vsPar, last10,
-    { label: "Win turn", key: "avg_win_turn", num: true }, avgDmg,
+    { label: "G", key: "games", num: true },
+    ...(state.statsView === "combat" ? combatCols : [
+      { label: "W", key: "wins", num: true }, pct("win_rate"), vsPar, last10,
+      { label: "Win turn", key: "avg_win_turn", num: true },
+    ]),
   ];
-  return parNote() + `<p class="muted small">Tap a deck for how it wins, its seats and recent results.</p>` + table(cols, rows, {
+  return viewSwitch() + `<p class="muted small">Tap a deck for how it wins, its seats and recent results.</p>` + table(cols, rows, {
     rowAttrs: (r) => `class="clickable ${r.id === state.deckOpen ? "open" : ""}" data-action="deck-detail" data-id="${r.id}"`,
     after: (r) => r.id === state.deckOpen && detail ? `<tr class="detail"><td colspan="${cols.length}">${deckDetail(detail)}</td></tr>` : "",
   });
@@ -770,6 +789,9 @@ $app.addEventListener("click", async (e) => {
     case "stats-tab":
       state.statsTab = d.tab;
       return render();
+    case "stats-view":
+      state.statsView = d.mode;
+      return loadStats();
     case "h2h-mode":
       state.h2hMode = d.mode;
       return loadStats();

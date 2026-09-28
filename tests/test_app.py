@@ -256,11 +256,17 @@ def test_knocked_out_by_and_nemesis(client):
     second["participants"][0]["eliminated_by"] = "Chris"
     client.post("/api/games", json=second)
 
-    ko = {r["player"]: r for r in client.get("/api/stats/knockouts").json()}
-    assert ko["Mark"]["kos"] == 2 and ko["Chris"]["kos"] == 1
-    assert ko["Brett"]["nemesis"] == {"name": "Mark", "count": 1}
-    assert ko["Mark"]["nemesis"] == {"name": "Chris", "count": 1}
-    assert ko["Brett"]["first_out"] == 2 and ko["Brett"]["first_out_rate"] == 100.0
+    players = {r["player"]: r for r in client.get("/api/stats/players").json()}
+    assert players["Mark"]["kos"] == 2 and players["Chris"]["kos"] == 1
+    assert players["Brett"]["first_out"] == 2 and players["Brett"]["first_out_rate"] == 100.0
+    decks = {r["deck"]: r for r in client.get("/api/stats/decks").json()}
+    assert decks["Atraxa, Praetors' Voice"]["kos"] == 2 and decks["Omnath"]["first_out"] == 2
+
+    nemesis = {r["player"]: r["nemesis"] for r in client.get("/api/stats/nemesis").json()}
+    assert nemesis["Brett"] == {"name": "Mark", "count": 1}
+    assert nemesis["Mark"] == {"name": "Chris", "count": 1}
+    assert nemesis["Chris"] == {"name": "Mark", "count": 1}
+    assert client.get("/api/stats/knockouts").status_code == 404
     history = client.get("/api/games").json()
     assert by(history[1]["participants"], "player", "Brett")["eliminated_by"] == "Mark"
 
@@ -286,10 +292,14 @@ def test_damage_dealt(client):
     assert by(players, "player", "Brett")["avg_dmg"] == 0.0
     assert by(client.get("/api/stats/decks").json(), "owner", "Chris")["avg_dmg"] == 12.0
 
-    ko = {r["player"]: r for r in client.get("/api/stats/knockouts").json()}
-    assert ko["Mark"]["most_targeted"] == {"name": "Chris", "count": 40}
-    assert (ko["Chris"]["avg_taken"], ko["Brett"]["avg_taken"]) == (40.0, 21.0)
-    assert ko["Brett"]["most_targeted"] is None
+    ps = {r["player"]: r for r in players}
+    assert ps["Mark"]["most_targeted"] == {"name": "Chris", "count": 40}
+    assert (ps["Chris"]["avg_taken"], ps["Brett"]["avg_taken"]) == (40.0, 21.0)
+    assert ps["Brett"]["most_targeted"] is None
+    assert by(client.get("/api/stats/nemesis").json(), "player", "Mark")["nemesis"] is None  # no one recorded
+    atraxa = by(client.get("/api/stats/decks").json(), "owner", "Mark")
+    assert atraxa["most_targeted"] == {"name": "Krenko (Chris)", "count": 40}
+    assert atraxa["avg_taken"] == 12.0
 
     for bad_row in ({"source": "Mark", "target": "Mark", "amount": 3},
                     {"source": "Mark", "target": "Zed", "amount": 3},

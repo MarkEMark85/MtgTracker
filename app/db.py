@@ -240,6 +240,14 @@ _TAKEN = "(SELECT COALESCE(SUM(dm.amount), 0) FROM damage dm WHERE dm.game_id = 
 _TRACKED = "EXISTS (SELECT 1 FROM damage dt WHERE dt.game_id = gp.game_id)"
 _AVG_DEALT = f"ROUND(AVG(CASE WHEN {_TRACKED} THEN {_DEALT} END), 1)"
 _AVG_TAKEN = f"ROUND(AVG(CASE WHEN {_TRACKED} THEN {_TAKEN} END), 1)"
+# Knockouts made in this game by whoever sat in this seat, and whether this seat was out first.
+_KOS = "(SELECT COUNT(*) FROM game_players k WHERE k.game_id = gp.game_id AND k.eliminated_by = gp.player_id)"
+_FIRST_OUT = "(gp.finish_place = s.n)"
+_COMBAT = f"""SUM({_KOS}) AS kos,
+               SUM({_FIRST_OUT}) AS first_out,
+               ROUND(100.0 * SUM({_FIRST_OUT}) / COUNT(*), 1) AS first_out_rate,
+               {_AVG_DEALT} AS avg_dmg,
+               {_AVG_TAKEN} AS avg_taken"""
 
 
 def _with_par(rows: List[Dict]) -> List[Dict]:
@@ -269,7 +277,7 @@ def player_stats(conn: sqlite3.Connection) -> List[Dict]:
                {_PAR} AS par,
                ROUND(AVG(gp.finish_place), 2) AS avg_finish,
                {_AVG_WIN_TURN} AS avg_win_turn,
-               {_AVG_DEALT} AS avg_dmg
+               {_COMBAT}
         FROM game_players gp
         JOIN players p ON p.id = gp.player_id
         JOIN games g ON g.id = gp.game_id
@@ -278,8 +286,15 @@ def player_stats(conn: sqlite3.Connection) -> List[Dict]:
         ORDER BY win_rate DESC, games DESC, p.name
     """))
     recent = _recent(conn, "player_id")
+    targeted = _top(conn.execute("""
+        SELECT dm.source_id AS id, t.name, SUM(dm.amount) AS n
+        FROM damage dm JOIN players t ON t.id = dm.target_id
+        GROUP BY dm.source_id, dm.target_id
+    """))
     for r in rows:
-        r["last10"] = recent[r.pop("id")]
+        pid = r.pop("id")
+        r["last10"] = recent[pid]
+        r["most_targeted"] = targeted.get(pid)
     return _with_par(rows)
 
 
@@ -293,7 +308,7 @@ def deck_stats(conn: sqlite3.Connection, owner: Optional[str] = None) -> List[Di
                {_PAR} AS par,
                ROUND(AVG(gp.finish_place), 2) AS avg_finish,
                {_AVG_WIN_TURN} AS avg_win_turn,
-               {_AVG_DEALT} AS avg_dmg
+               {_COMBAT}
         FROM game_players gp
         JOIN decks d ON d.id = gp.deck_id
         JOIN players p ON p.id = d.owner_id
@@ -304,8 +319,19 @@ def deck_stats(conn: sqlite3.Connection, owner: Optional[str] = None) -> List[Di
         ORDER BY win_rate DESC, games DESC, d.name
     """, params))
     recent = _recent(conn, "deck_id")
+    # The deck this deck hits hardest: damage from its pilot to the deck the target was playing.
+    targeted = _top(conn.execute("""
+        SELECT src.deck_id AS id, td.name || ' (' || tp.name || ')' AS name, SUM(dm.amount) AS n
+        FROM damage dm
+        JOIN game_players src ON src.game_id = dm.game_id AND src.player_id = dm.source_id
+        JOIN game_players tgt ON tgt.game_id = dm.game_id AND tgt.player_id = dm.target_id
+        JOIN decks td ON td.id = tgt.deck_id
+        JOIN players tp ON tp.id = td.owner_id
+        GROUP BY src.deck_id, tgt.deck_id
+    """))
     for r in rows:
         r["last10"] = recent[r["id"]]
+        r["most_targeted"] = targeted.get(r["id"])
     return _with_par(rows)
 
 
@@ -406,37 +432,21 @@ def deck_matchup_stats(conn: sqlite3.Connection, deck_ids: Optional[List[int]] =
     """, params))
 
 
-def knockout_stats(conn: sqlite3.Connection) -> List[Dict]:
-    """Per player: knockouts dealt, how often they're out first, their nemesis, and damage."""
-    rows = _rows(conn.execute(f"""
-        SELECT p.id, p.name AS player,
-               COUNT(*) AS games,
-               (SELECT COUNT(*) FROM game_players k WHERE k.eliminated_by = p.id) AS kos,
-               SUM(gp.finish_place = s.n) AS first_out,
-               ROUND(100.0 * SUM(gp.finish_place = s.n) / COUNT(*), 1) AS first_out_rate,
-               {_AVG_DEALT} AS avg_dealt,
-               {_AVG_TAKEN} AS avg_taken
-        FROM game_players gp
-        JOIN players p ON p.id = gp.player_id
-        JOIN games g ON g.id = gp.game_id
-        {_SIZES}
+def nemesis_stats(conn: sqlite3.Connection) -> List[Dict]:
+    """Per player: the opponent who has knocked them out most often (None if no one yet)."""
+    rows = _rows(conn.execute("""
+        SELECT p.id, p.name AS player, COUNT(*) AS games
+        FROM game_players gp JOIN players p ON p.id = gp.player_id
         GROUP BY p.id
-        ORDER BY kos DESC, first_out_rate, p.name
+        ORDER BY p.name
     """))
     nemesis = _top(conn.execute("""
         SELECT gp.player_id AS id, k.name, COUNT(*) AS n
         FROM game_players gp JOIN players k ON k.id = gp.eliminated_by
         GROUP BY gp.player_id, gp.eliminated_by
     """))
-    targeted = _top(conn.execute("""
-        SELECT dm.source_id AS id, t.name, SUM(dm.amount) AS n
-        FROM damage dm JOIN players t ON t.id = dm.target_id
-        GROUP BY dm.source_id, dm.target_id
-    """))
     for r in rows:
-        pid = r.pop("id")
-        r["nemesis"] = nemesis.get(pid)
-        r["most_targeted"] = targeted.get(pid)
+        r["nemesis"] = nemesis.get(r.pop("id"))
     return rows
 
 
