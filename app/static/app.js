@@ -264,7 +264,7 @@ function viewLive() {
         </div>
         <div class="pcard-tools">
           <button class="chip" data-action="life" data-p="${i}" data-delta="-5">&minus;5</button>
-          <button class="chip" data-action="halve" data-p="${i}" aria-label="Halve life, rounded up">&frac12;</button>
+          <button class="chip" data-action="halve" data-p="${i}" aria-label="Lose half your life, rounded up">&frac12;</button>
           <button class="chip ${g.openCmd === i ? "on" : ""}" data-action="toggle-cmd" data-p="${i}">Cmdr ${cmdTotal ? cmdTotal : ""}</button>
           <button class="chip" data-action="life" data-p="${i}" data-delta="5">+5</button>
         </div>
@@ -781,10 +781,10 @@ $app.addEventListener("click", async (e) => {
     case "start": return startGame();
     case "life": changeLife(i, +d.delta); break;
     case "halve": {
-      // Half your life, rounded up (e.g. 25 -> 13). Nothing to halve at 0 or below.
+      // Lose half your life, rounded up (e.g. 19 -> lose 10, leaving 9). Nothing to halve at 0 or below.
       const life = g.players[i].life;
       if (life <= 0) return;
-      changeLife(i, Math.ceil(life / 2) - life);
+      changeLife(i, -Math.ceil(life / 2));
       break;
     }
     case "life-tap": {
