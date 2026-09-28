@@ -77,7 +77,9 @@ const state = {
   h2hMode: "players",
   h2hDecks: load(H2H_KEY) || [],
   deckOpen: null,  // deck id expanded in the Decks stats tab
+  editLife: null,  // player index whose life total is being typed in
 };
+let lastTap = {};  // for spotting a double-tap on a life total
 
 function loadCurrentGame() {
   const g = load(GAME_KEY);
@@ -253,12 +255,16 @@ function viewLive() {
           <span class="pdeck">${esc(p.deck)}</span>
         </div>
         <div class="life-row">
-          <button class="life-btn" data-action="life" data-p="${i}" data-delta="-1" aria-label="Lose 1 life">&minus;</button>
-          <div class="life">${p.life}</div>
-          <button class="life-btn" data-action="life" data-p="${i}" data-delta="1" aria-label="Gain 1 life">+</button>
+          ${state.editLife === i
+            // While typing a new total the -/+ buttons are hidden so the box gets the whole row.
+            ? `<input class="life life-input" type="number" inputmode="numeric" data-life-edit="${i}" value="${p.life}" aria-label="Life total">`
+            : `<button class="life-btn" data-action="life" data-p="${i}" data-delta="-1" aria-label="Lose 1 life">&minus;</button>
+               <div class="life" data-action="life-tap" data-p="${i}" title="Double-tap to edit">${p.life}</div>
+               <button class="life-btn" data-action="life" data-p="${i}" data-delta="1" aria-label="Gain 1 life">+</button>`}
         </div>
         <div class="pcard-tools">
           <button class="chip" data-action="life" data-p="${i}" data-delta="-5">&minus;5</button>
+          <button class="chip" data-action="halve" data-p="${i}" aria-label="Halve life, rounded up">&frac12;</button>
           <button class="chip ${g.openCmd === i ? "on" : ""}" data-action="toggle-cmd" data-p="${i}">Cmdr ${cmdTotal ? cmdTotal : ""}</button>
           <button class="chip" data-action="life" data-p="${i}" data-delta="5">+5</button>
         </div>
@@ -306,6 +312,20 @@ function changeLife(i, delta) {
     bySource[src] = (bySource[src] || 0) - undo;
     g.turnDmg[i] = (g.turnDmg[i] || 0) - undo;
   }
+}
+
+// Set a life total directly (typed in after a double-tap). Goes through changeLife so a drop
+// is still credited as damage to the active player.
+function commitLifeEdit(el) {
+  const i = +el.dataset.lifeEdit;
+  if (state.editLife !== i) return;  // already handled (Enter and blur both land here)
+  state.editLife = null;
+  const v = parseInt(el.value, 10);
+  if (Number.isFinite(v) && v !== state.game.players[i].life) {
+    changeLife(i, v - state.game.players[i].life);
+    saveGame();
+  }
+  render();
 }
 
 function setActive(i) {
@@ -760,6 +780,25 @@ $app.addEventListener("click", async (e) => {
       return render();
     case "start": return startGame();
     case "life": changeLife(i, +d.delta); break;
+    case "halve": {
+      // Half your life, rounded up (e.g. 25 -> 13). Nothing to halve at 0 or below.
+      const life = g.players[i].life;
+      if (life <= 0) return;
+      changeLife(i, Math.ceil(life / 2) - life);
+      break;
+    }
+    case "life-tap": {
+      const now = Date.now();
+      const double = lastTap.p === i && now - lastTap.t < 400;
+      lastTap = double ? {} : { p: i, t: now };
+      if (!double) return;
+      state.editLife = i;
+      render();
+      const input = document.querySelector(`[data-life-edit="${i}"]`);
+      input.focus();
+      input.select();
+      return;
+    }
     case "cmd": {
       const p = g.players[i];
       const cur = p.cmd[d.from] || 0;
@@ -815,6 +854,16 @@ $app.addEventListener("click", async (e) => {
   if (d.action === "round" || d.action === "next-turn") g.turns = null;
   saveGame();
   render();
+});
+
+// Editing a life total: Enter or tapping away saves, Escape cancels.
+$app.addEventListener("keydown", (e) => {
+  if (!e.target.matches("[data-life-edit]")) return;
+  if (e.key === "Enter") commitLifeEdit(e.target);
+  if (e.key === "Escape") { state.editLife = null; render(); }
+});
+$app.addEventListener("focusout", (e) => {
+  if (e.target.matches("[data-life-edit]")) commitLifeEdit(e.target);
 });
 
 $app.addEventListener("change", (e) => {

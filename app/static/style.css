@@ -157,7 +157,11 @@ label { display: block; font-weight: 600; margin: 10px 0 6px; }
 .pname { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pdeck { display: block; font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .life-row { display: flex; align-items: center; justify-content: space-between; }
-.life { font-size: clamp(2.6rem, 13vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.life { font-size: clamp(2.6rem, 13vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1;
+  cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.life-input { width: 0; flex: 1; min-width: 0; height: 64px; padding: 0; min-height: 0; text-align: center; color: var(--text);
+  background: var(--bg); border: 2px solid var(--accent); border-radius: 10px; cursor: text; user-select: text; -webkit-user-select: text; }
+.life-input::-webkit-inner-spin-button, .life-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .life-btn {
   appearance: none; border: 0; background: var(--surface-2); color: var(--text);
   width: 44px; height: 64px; border-radius: 10px; font-size: 1.6rem; font-weight: 700;
